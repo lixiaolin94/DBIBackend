@@ -45,7 +45,7 @@ targets:
         PRODUCT_BUNDLE_IDENTIFIER: work.xiaolin.DBIBackend
         PRODUCT_NAME: DBI Backend
         # 版本规则见 docs/RELEASE.md：只递增最后一位，0.1.1 → 0.1.2 → …
-        MARKETING_VERSION: "0.1.0"
+        MARKETING_VERSION: "0.1.1"
         CURRENT_PROJECT_VERSION: "$(MARKETING_VERSION)"
         GENERATE_INFOPLIST_FILE: YES
         INFOPLIST_KEY_CFBundleDisplayName: DBI Backend
