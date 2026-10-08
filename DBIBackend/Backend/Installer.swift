@@ -34,8 +34,8 @@ final class Installer {
         fileprivate(set) var coverage = Coverage()
         /// 累计发送的字节（含重读），用来算速度
         fileprivate(set) var bytesSent: UInt64 = 0
-        fileprivate(set) var startedAt: Date?
-        fileprivate(set) var lastSentAt: Date?
+        /// 最近几秒的（时间, 累计字节）采样，用来算实时速度
+        fileprivate var samples: [(time: Date, bytes: UInt64)] = []
 
         init(url: URL, name: String, size: UInt64) {
             self.url = url
@@ -46,10 +46,22 @@ final class Installer {
         /// 已经发给 Switch 的字节（不重复计算）
         var covered: UInt64 { coverage.total }
 
-        /// 平均速度（字节/秒），还没开始时为 nil
-        var bytesPerSecond: Double? {
-            guard let startedAt, let lastSentAt, lastSentAt > startedAt else { return nil }
-            return Double(bytesSent) / lastSentAt.timeIntervalSince(startedAt)
+        /// 实时速度的统计窗口
+        static let speedWindow: TimeInterval = 3
+
+        /// 最近 3 秒的实时速度（字节/秒）。Switch 停下来不要数据时会逐渐降到 0；不在发送时为 nil。
+        func bytesPerSecond(at now: Date = Date()) -> Double? {
+            guard state == .sending, let first = samples.first, let last = samples.last else { return nil }
+            let elapsed = now.timeIntervalSince(first.time)
+            guard elapsed > 0.5 else { return nil }   // 刚开始，样本太少
+            return Double(last.bytes - first.bytes) / max(elapsed, 1)
+        }
+
+        fileprivate func record(_ length: UInt64, at now: Date) {
+            bytesSent += length
+            samples.append((now, bytesSent))
+            // 保留窗口起点之前的最后一个样本，作为这段时间的基准
+            while samples.count > 2, now.timeIntervalSince(samples[1].time) >= Self.speedWindow { samples.removeFirst() }
         }
     }
 
@@ -222,13 +234,12 @@ final class Installer {
             }
             if item.state != .sending {
                 item.state = .sending
-                item.startedAt = now
                 item.coverage = Coverage()
                 item.bytesSent = 0
+                item.samples = [(now, 0)]
             }
             item.coverage.insert(offset ..< offset + UInt64(length))
-            item.bytesSent += UInt64(length)
-            item.lastSentAt = now
+            item.record(UInt64(length), at: now)
             if item.covered >= item.size { item.state = .sent }
         case .exit:
             log.info("switch exited")

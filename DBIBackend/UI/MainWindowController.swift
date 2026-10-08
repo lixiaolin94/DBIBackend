@@ -8,18 +8,22 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
 
     private let statusIcon = NSImageView()
     private let statusTitle = NSTextField(labelWithString: "")
-    private let statusDetail = NSTextField(wrappingLabelWithString: "")
+    /// 固定一行：可换行的标签在窗口改宽度时会在一行、两行之间来回算，带着整个顶部区域的高度跳动
+    private let statusDetail = NSTextField(labelWithString: "")
     private let retryButton = NSButton(title: String(localized: "重试"), target: nil, action: nil)
     private let table = FileTableView()
     private let emptyLabel = NSTextField(labelWithString: String(localized: "把 NSP、NSZ、XCI、XCZ 文件或文件夹拖到这里"))
-    private let removeButton = NSButton(title: String(localized: "移除"), target: nil, action: nil)
+    /// 列表下方经典的「+ / −」按钮条
+    private let addRemove = NSSegmentedControl()
     private let clearButton = NSButton(title: String(localized: "清除已传完"), target: nil, action: nil)
+    /// 发送时每秒刷新一次速度列：Switch 停下来不要数据时不会有新事件，速度也要跟着降
+    private var speedTimer: Timer?
 
     init() {
         let window = NSWindow(contentRect: NSRect(x: 0, y: 0, width: 640, height: 420),
                               styleMask: [.titled, .closable, .miniaturizable, .resizable], backing: .buffered, defer: false)
         window.title = "DBI Backend"
-        window.minSize = NSSize(width: 480, height: 300)
+        window.minSize = NSSize(width: 580, height: 300)
         window.setFrameAutosaveName("MainWindow")
         if !window.setFrameUsingName("MainWindow") { window.center() }
         super.init(window: window)
@@ -42,6 +46,11 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         statusTitle.font = .systemFont(ofSize: NSFont.systemFontSize + 2, weight: .semibold)
         statusDetail.textColor = .secondaryLabelColor
         statusDetail.font = .systemFont(ofSize: NSFont.systemFontSize)
+        statusDetail.lineBreakMode = .byTruncatingTail
+        statusDetail.maximumNumberOfLines = 1
+        // 放不下时截断，而不是把窗口撑宽
+        statusDetail.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+        statusTitle.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
         retryButton.target = self
         retryButton.action = #selector(retry(_:))
         retryButton.bezelStyle = .rounded
@@ -54,14 +63,22 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         header.spacing = 12
         header.edgeInsets = NSEdgeInsets(top: 16, left: 20, bottom: 16, right: 20)
 
-        for (id, title, width) in [("name", String(localized: "名称"), 300.0), ("size", String(localized: "大小"), 80.0), ("status", String(localized: "状态"), 200.0)] {
-            let column = NSTableColumn(identifier: .init(id))
-            column.title = title
-            column.width = width
-            column.minWidth = id == "size" ? 60 : 120
+        let columns: [(id: String, title: String, width: CGFloat, minWidth: CGFloat, alignment: NSTextAlignment)] = [
+            ("name", String(localized: "名称"), 220, 120, .left),
+            ("size", String(localized: "大小"), 80, 60, .right),
+            ("progress", String(localized: "进度"), 140, 80, .left),
+            ("speed", String(localized: "速度"), 90, 70, .right),
+        ]
+        for c in columns {
+            let column = NSTableColumn(identifier: .init(c.id))
+            column.title = c.title
+            column.width = c.width
+            column.minWidth = c.minWidth
+            column.headerCell.alignment = c.alignment
             table.addTableColumn(column)
         }
-        table.style = .inset
+        table.style = .fullWidth
+        table.gridStyleMask = []
         table.usesAlternatingRowBackgroundColors = true
         table.allowsMultipleSelection = true
         table.rowHeight = 24
@@ -72,6 +89,9 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         table.setDraggingSourceOperationMask(.copy, forLocal: false)
         table.onDelete = { [weak self] in self?.removeSelected(nil) }
         table.menu = contextMenu()
+        // 记住列宽和列顺序（在加完列之后设置，才会恢复上次保存的宽度）
+        table.autosaveName = "GameTable"
+        table.autosaveTableColumns = true
         let scroll = NSScrollView()
         scroll.documentView = table
         scroll.hasVerticalScroller = true
@@ -80,20 +100,30 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         emptyLabel.textColor = .tertiaryLabelColor
         emptyLabel.font = .systemFont(ofSize: NSFont.systemFontSize + 1)
 
-        let addButton = NSButton(title: String(localized: "添加…"), target: self, action: #selector(addFiles(_:)))
-        removeButton.target = self
-        removeButton.action = #selector(removeSelected(_:))
+        addRemove.segmentStyle = .smallSquare
+        addRemove.trackingMode = .momentary
+        addRemove.segmentCount = 2
+        addRemove.setImage(NSImage(named: NSImage.addTemplateName), forSegment: 0)
+        addRemove.setImage(NSImage(named: NSImage.removeTemplateName), forSegment: 1)
+        addRemove.setToolTip(String(localized: "添加游戏文件…"), forSegment: 0)
+        addRemove.setToolTip(String(localized: "移除选中的文件"), forSegment: 1)
+        for i in 0..<2 { addRemove.setWidth(26, forSegment: i) }
+        addRemove.target = self
+        addRemove.action = #selector(addRemoveClicked(_:))
+        clearButton.controlSize = .small
         clearButton.target = self
         clearButton.action = #selector(clearFinished(_:))
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
-        let footer = NSStackView(views: [addButton, removeButton, spacer, clearButton])
-        footer.edgeInsets = NSEdgeInsets(top: 10, left: 20, bottom: 14, right: 20)
+        let footer = NSStackView(views: [addRemove, spacer, clearButton])
+        footer.edgeInsets = NSEdgeInsets(top: 6, left: 8, bottom: 8, right: 12)
+        let footerSeparator = NSBox()
+        footerSeparator.boxType = .separator
 
         let separator = NSBox()
         separator.boxType = .separator
 
-        for v in [header, separator, scroll, emptyLabel, footer] as [NSView] {
+        for v in [header, separator, scroll, emptyLabel, footerSeparator, footer] as [NSView] {
             v.translatesAutoresizingMaskIntoConstraints = false
             content.addSubview(v)
         }
@@ -107,7 +137,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             scroll.topAnchor.constraint(equalTo: separator.bottomAnchor),
             scroll.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             scroll.trailingAnchor.constraint(equalTo: content.trailingAnchor),
-            footer.topAnchor.constraint(equalTo: scroll.bottomAnchor),
+            footerSeparator.topAnchor.constraint(equalTo: scroll.bottomAnchor),
+            footerSeparator.leadingAnchor.constraint(equalTo: content.leadingAnchor),
+            footerSeparator.trailingAnchor.constraint(equalTo: content.trailingAnchor),
+            footer.topAnchor.constraint(equalTo: footerSeparator.bottomAnchor),
             footer.leadingAnchor.constraint(equalTo: content.leadingAnchor),
             footer.trailingAnchor.constraint(equalTo: content.trailingAnchor),
             footer.bottomAnchor.constraint(equalTo: content.bottomAnchor),
@@ -149,6 +182,7 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             statusTitle.stringValue = String(localized: "无法连接 Switch")
             statusDetail.stringValue = message
         }
+        statusDetail.toolTip = statusDetail.stringValue   // 截断时悬停能看到全文
         statusIcon.image = NSImage(systemSymbolName: symbol, accessibilityDescription: nil)
         statusIcon.contentTintColor = tint
         retryButton.isHidden = { if case .failed = installer.connection { return false } else { return true } }()
@@ -159,10 +193,28 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
         table.selectRowIndexes(rows, byExtendingSelection: false)
         emptyLabel.isHidden = !installer.items.isEmpty
         updateButtons()
+        updateSpeedTimer()
+    }
+
+    private func updateSpeedTimer() {
+        if installer.isSending, speedTimer == nil {
+            speedTimer = Timer.scheduledTimer(withTimeInterval: 1, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.reloadSpeedColumn() }
+            }
+        } else if !installer.isSending {
+            speedTimer?.invalidate()
+            speedTimer = nil
+        }
+    }
+
+    private func reloadSpeedColumn() {
+        let column = table.column(withIdentifier: .init("speed"))
+        guard column >= 0, table.numberOfRows > 0 else { return }
+        table.reloadData(forRowIndexes: IndexSet(integersIn: 0..<table.numberOfRows), columnIndexes: IndexSet(integer: column))
     }
 
     private func updateButtons() {
-        removeButton.isEnabled = selectedItems.contains { $0.state != .sending }
+        addRemove.setEnabled(selectedItems.contains { $0.state != .sending }, forSegment: 1)
         clearButton.isEnabled = installer.items.contains { $0.state == .sent }
     }
 
@@ -184,6 +236,10 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             let urls = panel.urls
             MainActor.assumeIsolated { _ = self?.installer.add(urls) }
         }
+    }
+
+    @objc private func addRemoveClicked(_ sender: NSSegmentedControl) {
+        if sender.selectedSegment == 0 { addFiles(sender) } else { removeSelected(sender) }
     }
 
     @objc func removeSelected(_ sender: Any?) {
@@ -219,24 +275,23 @@ final class MainWindowController: NSWindowController, NSTableViewDataSource, NST
             cell.configure(item)
             return cell
         case "size":
-            let cell = tableView.makeView(withIdentifier: .init("size"), owner: nil) as? NSTextField ?? Self.sizeLabel()
-            cell.stringValue = ByteCountFormatter.string(fromByteCount: Int64(item.size), countStyle: .file)
+            let cell = tableView.makeView(withIdentifier: .init("size"), owner: nil) as? TextCell ?? TextCell(identifier: "size")
+            cell.label.stringValue = Self.bytes(item.size)
+            return cell
+        case "progress":
+            let cell = tableView.makeView(withIdentifier: .init("progress"), owner: nil) as? ProgressCell ?? ProgressCell()
+            cell.identifier = .init("progress")
+            cell.configure(item)
             return cell
         default:
-            let cell = tableView.makeView(withIdentifier: .init("status"), owner: nil) as? StatusCell ?? StatusCell()
-            cell.identifier = .init("status")
-            cell.configure(item)
+            let cell = tableView.makeView(withIdentifier: .init("speed"), owner: nil) as? TextCell ?? TextCell(identifier: "speed")
+            cell.label.stringValue = item.bytesPerSecond().map { "\(Self.bytes(UInt64($0)))/s" } ?? ""
             return cell
         }
     }
 
-    private static func sizeLabel() -> NSTextField {
-        let label = NSTextField(labelWithString: "")
-        label.identifier = .init("size")
-        label.alignment = .right
-        label.textColor = .secondaryLabelColor
-        label.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
-        return label
+    static func bytes(_ n: UInt64) -> String {
+        ByteCountFormatter.string(fromByteCount: Int64(clamping: n), countStyle: .file)
     }
 
     func tableViewSelectionDidChange(_ notification: Notification) { updateButtons() }
@@ -300,7 +355,32 @@ private final class NameCell: NSTableCellView {
     }
 }
 
-private final class StatusCell: NSTableCellView {
+/// 右对齐的等宽数字（大小、速度）
+private final class TextCell: NSTableCellView {
+    let label = NSTextField(labelWithString: "")
+
+    init(identifier: String) {
+        super.init(frame: .zero)
+        self.identifier = .init(identifier)
+        label.alignment = .right
+        label.textColor = .secondaryLabelColor
+        label.font = .monospacedDigitSystemFont(ofSize: NSFont.systemFontSize, weight: .regular)
+        label.lineBreakMode = .byClipping
+        textField = label
+        label.translatesAutoresizingMaskIntoConstraints = false
+        addSubview(label)
+        NSLayoutConstraint.activate([
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -2),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+}
+
+/// 发送中只显示进度条（百分比在悬停提示里）；其他状态显示一个短词
+private final class ProgressCell: NSTableCellView {
     private let bar = NSProgressIndicator()
     private let label = NSTextField(labelWithString: "")
 
@@ -311,45 +391,41 @@ private final class StatusCell: NSTableCellView {
         bar.isIndeterminate = false
         bar.minValue = 0
         bar.maxValue = 1
-        label.font = .monospacedDigitSystemFont(ofSize: NSFont.smallSystemFontSize, weight: .regular)
         label.lineBreakMode = .byTruncatingTail
-        let stack = NSStackView(views: [bar, label])
-        stack.orientation = .vertical
-        stack.alignment = .leading
-        stack.spacing = 0
-        stack.translatesAutoresizingMaskIntoConstraints = false
-        addSubview(stack)
+        for v in [bar, label] as [NSView] {
+            v.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(v)
+        }
         NSLayoutConstraint.activate([
-            stack.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
-            stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
-            stack.centerYAnchor.constraint(equalTo: centerYAnchor),
-            bar.widthAnchor.constraint(equalTo: stack.widthAnchor),
+            bar.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            bar.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            bar.centerYAnchor.constraint(equalTo: centerYAnchor),
+            label.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 2),
+            label.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -4),
+            label.centerYAnchor.constraint(equalTo: centerYAnchor),
         ])
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     func configure(_ item: Installer.Item) {
-        let bytes = { (n: UInt64) in ByteCountFormatter.string(fromByteCount: Int64(n), countStyle: .file) }
+        let fraction = item.size > 0 ? min(Double(item.covered) / Double(item.size), 1) : 0
+        bar.isHidden = item.state != .sending
+        label.isHidden = item.state == .sending
+        let percent = fraction.formatted(.percent.precision(.fractionLength(0)))
+        bar.doubleValue = fraction
+        toolTip = item.state == .sending ? percent : nil
         switch item.state {
         case .ready:
-            bar.isHidden = true
-            label.stringValue = String(localized: "等待在 Switch 上选择")
+            label.stringValue = String(localized: "等待选择")
             label.textColor = .secondaryLabelColor
         case .sending:
-            bar.isHidden = false
-            bar.doubleValue = item.size > 0 ? Double(item.covered) / Double(item.size) : 0
-            var text = "\(bytes(item.covered)) / \(bytes(item.size))"
-            if let speed = item.bytesPerSecond { text += " · \(bytes(UInt64(speed)))/s" }
-            label.stringValue = text
-            label.textColor = .labelColor
+            break
         case .sent:
-            bar.isHidden = true
             label.stringValue = String(localized: "已传完")
             label.textColor = .systemGreen
         case .interrupted:
-            bar.isHidden = true
-            label.stringValue = String(localized: "已中断（传到 \(bytes(item.covered))）")
+            label.stringValue = String(localized: "已中断（\(percent)）")
             label.textColor = .systemOrange
         }
     }
