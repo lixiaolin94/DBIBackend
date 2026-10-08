@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<!-- 不开 App Sandbox：直接用 IOUSBHost 打开 DBI 的 USB 接口，非沙盒 app 不需要额外 entitlement -->
+</dict>
+</plist>
