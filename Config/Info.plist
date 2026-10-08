@@ -18,5 +18,13 @@
 	<string>1.0</string>
 	<key>CFBundleVersion</key>
 	<string>1</string>
+	<key>SUEnableAutomaticChecks</key>
+	<true/>
+	<key>SUFeedURL</key>
+	<string>https://github.com/lixiaolin94/DBIBackend/releases/latest/download/appcast.xml</string>
+	<key>SUPublicEDKey</key>
+	<string>eaPIgZ2aNcGGEWHZVbVc1rmaP1jKoX4inFv+5k79TpA=</string>
+	<key>SUScheduledCheckInterval</key>
+	<integer>86400</integer>
 </dict>
 </plist>

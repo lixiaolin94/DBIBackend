@@ -13,6 +13,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             NSApp.requestUserAttention(.informationalRequest)
         }
         Installer.shared.start()
+        AppUpdater.shared.start()
         window.showWindow(nil)
         NSApp.activate(ignoringOtherApps: true)
     }

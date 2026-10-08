@@ -29,6 +29,9 @@ enum MainMenu {
         let name = "DBI Backend"
         let m = NSMenu(title: name)
         m.addItem(item(String(localized: "关于 \(name)"), #selector(NSApplication.orderFrontStandardAboutPanel(_:))))
+        let update = item(String(localized: "检查更新…"), #selector(AppUpdater.checkForUpdates(_:)))
+        update.target = AppUpdater.shared
+        m.addItem(update)
         m.addItem(.separator())
         m.addItem(item(String(localized: "隐藏 \(name)"), #selector(NSApplication.hide(_:)), "h"))
         m.addItem(item(String(localized: "隐藏其他"), #selector(NSApplication.hideOtherApplications(_:)), "h", [.command, .option]))

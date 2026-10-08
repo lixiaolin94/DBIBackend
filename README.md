@@ -3,7 +3,12 @@
 macOS 原生的 DBI「从 DBIbackend 安装游戏」电脑端：把 NSP / NSZ / XCI / XCZ 拖进窗口，在 Switch 上选择要装的游戏，边传边装。
 没有 4 GB 限制，不占 SD 卡空间，也不需要屏蔽 macOS 的任何系统服务。
 
-要求 macOS 13 或更新版本。目前没有打包好的下载，需要自己用 Xcode 编译（见下方「开发」）。
+要求 macOS 13 或更新版本。
+
+## 下载
+
+从 [Releases](https://github.com/lixiaolin94/DBIBackend/releases/latest) 下载 `DBIBackend-<版本>.zip`，解压后拖进「应用程序」。
+安装包经过 Developer ID 签名和苹果公证；之后的版本会在应用内自动更新。
 
 > 本项目与 DBI 作者、任天堂均无关联。请只安装你合法拥有的游戏。
 
@@ -41,3 +46,9 @@ xcodebuild -project DBIBackend.xcodeproj -scheme DBIBackend test
 - `Backend/Installer.swift`：监听 Switch 插拔、游戏列表、会话线程
 - `Backend/Coverage.swift`：进度区间
 - `UI/MainWindowController.swift`：唯一的窗口
+
+发版流程见 [docs/RELEASE.md](docs/RELEASE.md)，更新记录见 [CHANGELOG.md](CHANGELOG.md)。
+
+## 许可证
+
+[MIT](LICENSE)
